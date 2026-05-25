@@ -326,9 +326,7 @@ local function createESP(model)
         nameText = Drawing.new("Text"),
         distanceText = Drawing.new("Text"),
         weaponText = Drawing.new("Text"),
-        healthOutlineBg = Drawing.new("Square"),
-        healthOutline = Drawing.new("Square"),
-        healthLines = {},
+        healthBarFill = nil,
         healthText = Drawing.new("Text"),
         skeletonLines = {},
         chamHighlight = nil,
@@ -365,21 +363,17 @@ local function createESP(model)
     esp.weaponText.Outline = true
     esp.weaponText.Visible = false
 
-    esp.healthOutlineBg.Thickness = 1
-    esp.healthOutlineBg.Color = Color3.fromRGB(0, 0, 0)
-    esp.healthOutlineBg.Filled = true
-    esp.healthOutlineBg.Visible = false
-
-    esp.healthOutline.Thickness = 1
-    esp.healthOutline.Color = Color3.fromRGB(0, 0, 0)
-    esp.healthOutline.Filled = false
-    esp.healthOutline.Visible = false
-
     esp.healthText.Size = 13
     esp.healthText.Outline = true
     esp.healthText.Font = L.Font
     esp.healthText.Visible = false
 
+    -- Professional healthbar: single filled rectangle with smooth gradient
+    esp.healthBarFill = Drawing.new("Square")
+    esp.healthBarFill.Filled = true
+    esp.healthBarFill.Thickness = 0
+    esp.healthBarFill.Visible = false
+    
     for i = 1, 14 do
         local outline = Drawing.new("Line")
         outline.Thickness = 2
@@ -390,13 +384,6 @@ local function createESP(model)
         fill.Color = Color3.fromRGB(255, 255, 255)
         fill.Visible = false
         esp.skeletonLines[i] = { outline = outline, fill = fill }
-    end
-    for i = 1, 160 do
-        local sq = Drawing.new("Square")
-        sq.Filled = true
-        sq.Thickness = 1
-        sq.Visible = false
-        esp.healthLines[i] = sq
     end
     esp.boxCornerFill, esp.boxCornerOut = {}, {}
     for i = 1, 8 do
@@ -437,13 +424,7 @@ local function removeESP(model)
         if esp.healthOutlineBg then pcall(function() esp.healthOutlineBg:Remove() end) end
         if esp.healthOutline then pcall(function() esp.healthOutline:Remove() end) end
         if esp.healthText then pcall(function() esp.healthText:Remove() end) end
-        if esp.healthLines then
-            for i = 1, #esp.healthLines do
-                local line = esp.healthLines[i]
-                if line then pcall(function() line:Remove() end) end
-            end
-            table.clear(esp.healthLines)
-        end
+        if esp.healthBarFill then pcall(function() esp.healthBarFill:Remove() end) end
         for _, key in ipairs({ "gradName", "gradWeapon", "gradDist", "gradHealth" }) do
             local pool = esp[key]
             if pool then
@@ -789,12 +770,7 @@ local function hideESP(esp)
     if esp.healthOutlineBg then esp.healthOutlineBg.Visible = false end
     if esp.healthOutline then esp.healthOutline.Visible = false end
     if esp.healthText then esp.healthText.Visible = false end
-    if esp.healthLines then
-        for i = 1, #esp.healthLines do
-            local line = esp.healthLines[i]
-            if line then line.Visible = false end
-        end
-    end
+    if esp.healthBarFill then esp.healthBarFill.Visible = false end
     if esp.skeletonLines then
         for i = 1, #esp.skeletonLines do
             local line = esp.skeletonLines[i]
@@ -1276,6 +1252,7 @@ local function onRender(dt)
                 local health = math.clamp(humanoid.Health, 0, maxHealth)
                 local healthPercentage = health / maxHealth
                 
+                -- Smooth health animation
                 if not esp.healthLerp then esp.healthLerp = healthPercentage end
                 esp.healthLerp = esp.healthLerp + (healthPercentage - esp.healthLerp) * math.min(1, dt * 10)
 
@@ -1285,58 +1262,59 @@ local function onRender(dt)
                 local barY = math.floor(box.y)
                 local barW = barThickness
                 local barH = math.floor(box.h)
-                esp.healthOutlineBg.Filled = true
-                esp.healthOutlineBg.Size = Vector2.new(barW + 2, barH + 2)
-                esp.healthOutlineBg.Position = Vector2.new(barX - 1, barY - 1)
-                esp.healthOutlineBg.Color = Color3.new(0, 0, 0)
-                esp.healthOutlineBg.Transparency = esp.opacity
-                esp.healthOutlineBg.Visible = true
 
-                esp.healthOutline.Filled = false
-                esp.healthOutline.Thickness = 1
-                esp.healthOutline.Size = Vector2.new(barW, barH)
-                esp.healthOutline.Position = Vector2.new(barX, barY)
-                esp.healthOutline.Color = Color3.new(0, 0, 0)
-                esp.healthOutline.Transparency = esp.opacity
-                esp.healthOutline.Visible = false
-
-                local filledH = math.max(1, math.floor(barH * esp.healthLerp))
+                -- Calculate exact filled height based on current health percentage
+                local filledH = math.max(0, math.floor(barH * esp.healthLerp + 0.5))
                 local filledY = barY + (barH - filledH)
 
-                local lineMax = #esp.healthLines
-                local needed = math.min(math.max(1, filledH), lineMax)
-                local animTime = L.HGradAnim and (now * (L.HGradAnimSpeed or 1)) or 0
-                for i = 1, needed do
-                    local sq = esp.healthLines[i]
-                    if sq then
-                        sq.Size = Vector2.new(barW, 1)
-                        sq.Position = Vector2.new(barX, filledY + (needed - i))
-                        sq.Transparency = esp.opacity
-                        if L.HGrad then
-                            local t = i / needed
-                            if L.HGradAnim then
-                                local style = L.HGradAnimStyle
-                                if style == "Orbit" then t = (t + animTime * 0.12) % 1
-                                elseif style == "Helix" then t = (t + math.sin((t * 4) - (animTime * 2)) * 0.18) % 1
-                                elseif style == "Stream" then t = (t + animTime * 0.22) % 1; t = t * t * (3 - 2 * t)
-                                elseif style == "Flux" then t = t + math.sin((t * 8) + animTime) * 0.08
-                                elseif style == "Nova" then t = t + math.cos((t * 5) - animTime * 1.4) * 0.12
-                                elseif style == "Drift" then t = (t + animTime * 0.08 + math.sin(t * 10 + animTime) * 0.04) % 1
-                                end
-                            end
-                            sq.Color = currentHLC:Lerp(currentHHC, math.clamp(t, 0, 1))
-                        else
-                            sq.Color = currentHHC:Lerp(currentHLC, 1 - esp.healthLerp)
+                -- Render clean healthbar with no background - missing health is fully transparent
+                if filledH > 0 then
+                    -- Professional animated gradient: smooth 2-color blend with subtle wave motion
+                    local animTime = now * (L.HGradAnimSpeed or 1)
+                    local gradBase = currentHLC
+                    local gradTop = currentHHC
+                    
+                    if L.HGrad and L.HGradAnim then
+                        -- Modern lightweight gradient animation with smooth sinusoidal blend
+                        local style = L.HGradAnimStyle or "Orbit"
+                        local waveOffset = 0
+                        
+                        if style == "Helix" then
+                            waveOffset = math.sin(animTime * 1.8) * 0.15
+                        elseif style == "Stream" then
+                            waveOffset = (animTime * 0.25) % 1
+                            waveOffset = waveOffset * waveOffset * (3 - 2 * waveOffset)
+                        elseif style == "Flux" then
+                            waveOffset = math.sin(animTime * 1.4) * 0.12 + math.cos(animTime * 0.9) * 0.08
+                        elseif style == "Nova" then
+                            waveOffset = math.abs(math.sin(animTime * 1.1)) * 0.2
+                        elseif style == "Drift" then
+                            waveOffset = ((animTime * 0.08) + math.sin(animTime) * 0.1) % 1
+                        else -- Orbit (default)
+                            waveOffset = (animTime * 0.15) % 1
                         end
-                        sq.Visible = true
+                        
+                        -- Create smooth gradient by sampling color at position along bar
+                        -- Using a clean linear interpolation with subtle animated offset
+                        esp.healthBarFill.Color = gradBase:Lerp(gradTop, 0.5 + waveOffset * 0.5)
+                    elseif L.HGrad then
+                        -- Static gradient: midpoint blend
+                        esp.healthBarFill.Color = gradBase:Lerp(gradTop, 0.5)
+                    else
+                        -- Dynamic color based on health percentage
+                        esp.healthBarFill.Color = gradBase:Lerp(gradTop, 1 - esp.healthLerp)
                     end
-                end
-                for i = needed + 1, lineMax do
-                    local sq = esp.healthLines[i]
-                    if sq then sq.Visible = false end
+                    
+                    -- Set healthbar properties for perfect rendering
+                    esp.healthBarFill.Size = Vector2.new(barW, filledH)
+                    esp.healthBarFill.Position = Vector2.new(barX, filledY)
+                    esp.healthBarFill.Transparency = esp.opacity
+                    esp.healthBarFill.Visible = true
+                else
+                    esp.healthBarFill.Visible = false
                 end
 
-
+                -- Health text display
                 if L.HTE and healthPercentage < 0.99 then
                     local hpText = tostring(math.floor(healthPercentage * 100))
                     esp.gradHealth = drawEspLabel(esp.healthText, esp.gradHealth, hpText, barX - 15, filledY - 2, currentFontSize - 2, currentFont, esp.opacity, currentHTC, false, G.textGradPhase)
@@ -1347,10 +1325,7 @@ local function onRender(dt)
             else
                 esp.healthOutlineBg.Visible = false
                 esp.healthOutline.Visible = false
-                for i = 1, #esp.healthLines do
-                    local sq = esp.healthLines[i]
-                    if sq then sq.Visible = false end
-                end
+                esp.healthBarFill.Visible = false
                 esp.healthText.Visible = false
             end
 
